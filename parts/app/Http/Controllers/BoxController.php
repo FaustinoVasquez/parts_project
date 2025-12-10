@@ -16,7 +16,7 @@ class BoxController extends Controller
     {
 
         if ($request->ajax()){
-            $data = Box::query();
+            $data = Box::query()->withCount('kits');
             return datatables($data)
                 ->addIndexColumn()
                 ->editColumn('date_created', function($box) {
@@ -26,7 +26,7 @@ class BoxController extends Controller
                     return $box->getIsActive();
                 })
                 ->addColumn('kits', function($box) {
-                    return $box->kits()->count();
+                    return $box->kits_count;
                 })
 
                 ->addColumn('actions', function(){

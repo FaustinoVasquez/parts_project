@@ -15,7 +15,7 @@ class ShelfController extends Controller
     {
 
         if ($request->ajax()) {
-            $data = Shelf::query();
+            $data = Shelf::query()->withCount('boxes');
 
             return datatables($data)
                 ->addIndexColumn()
@@ -23,7 +23,7 @@ class ShelfController extends Controller
                     return $shelf->getCreatedAt();
                 })
                 ->editColumn('boxes', function ($shelf) {
-                    return $shelf->boxes()->count();
+                    return $shelf->boxes_count;
                 })
                 ->addColumn('actions', function () {
                     $btns = '<button class="qrcode btn btn-sm btn-dark"><i class="fas fa-print"></i></button>

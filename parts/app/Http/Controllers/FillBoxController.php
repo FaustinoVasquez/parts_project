@@ -38,9 +38,7 @@ class FillBoxController extends Controller
     public function store(Request $request)
     {
         $boxId = $request->BoxID;
-        $kits = $request->KitID;
-
-//        $box = Box::where('box_id',$boxId)->first();
+        $kitLCNs = $request->KitID;
 
         try {
             $box = Box::where('box_id',$boxId)->first();
@@ -49,19 +47,21 @@ class FillBoxController extends Controller
             return back()->with('danger','The box doesnt exists');
         }
 
+        // Fetch all kits in a single query instead of N queries
+        $kits = Kit::whereIn('KitLCN', $kitLCNs)->get()->keyBy('KitLCN');
 
-        foreach ($kits as $kit_id){
-            $kit = Kit::where('KitLCN',$kit_id)->first();
-            if ($kit === null) {
-                return back()->with('danger','The kit '.$kit_id.' information doesnt exists');
+        // Validate all kits exist
+        foreach ($kitLCNs as $kitLCN) {
+            if (!$kits->has($kitLCN)) {
+                return back()->with('danger','The kit '.$kitLCN.' information doesnt exists');
             }
         }
 
-
-        foreach ($kits as $kit){
+        // Create box contents using the cached kits
+        foreach ($kitLCNs as $kitLCN) {
             BoxContent::create([
                 'box_id' => $boxId,
-                'kit_id' => Kit::where('KitLCN',$kit)->first()->KitID
+                'kit_id' => $kits->get($kitLCN)->KitID
             ]);
         }
 

@@ -4,6 +4,7 @@ services:
     image: nginx:latest
     ports:
       - 8080:80
+      - 8443:443
     depends_on:
       - php
     volumes:
@@ -11,7 +12,8 @@ services:
       - ./nginx/snippets:/etc/nginx/snippets:ro
       - ./nginx/conf/fastcgi.conf:/etc/nginx/fastcgi.conf:ro
       - ./parts:/var/www/
-      - ./logs/nginx:/var/log/nginx 
+      - ./logs/nginx:/var/log/nginx
+      - "/home/fvasquez/mitechnologies wildcard ssl:/etc/nginx/ssl:ro"
     networks:
       - app-network
     restart: always
@@ -23,13 +25,28 @@ services:
     restart: always
     working_dir: /var/www
     volumes:
-      - ./parts:/var/www            
-      - ./logs/php:/var/log/php-fpm 
+      - ./parts:/var/www
+      - ./logs/php:/var/log/php-fpm
       # - ./parts/.env:/var/www/.env
     networks:
       - app-network
     command: ["php-fpm", "-F"]
 
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6380:6379"
+    networks:
+      - app-network
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+
 networks:
   app-network:
     driver: bridge
+
+volumes:
+  redis-data:
+    driver: local

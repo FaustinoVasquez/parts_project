@@ -33,7 +33,10 @@
                                             <div class="input-group-prepend">
                                                 <span class="input-group-text"><i class="fas fa-fw fa-layer-group" style="color:blue"></i></span>
                                             </div>
-                                            <input id="search_sku" type="search" class="form-control" placeholder="Filter by Sku">
+                                            <input id="search_sku" type="search" class="form-control" placeholder="Filter by Sku (Enter to search)">
+                                            <div class="input-group-append">
+                                                <button class="btn btn-primary" type="button" id="btn-search-sku"><i class="fas fa-search"></i></button>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="col-md-3">
@@ -250,37 +253,81 @@
                 ],
                 columnDefs: [
                     {
-                        targets: [0],
-                        searchable: true,
-                        // visible: false,
+                        // Disable column-level searching for all columns
+                        // Full-Text search is handled server-side in KitController
+                        targets: '_all',
+                        searchable: false,
                     },
                     {
                         targets: [13],
-                        searchable: true,
                         visible: false
-                    },
-                    {
-                        targets: [5,6,9,10,11,12],
-                        searchable: false,
                     },
                     {
                         targets: [6,7,9,10,11],
                         className: "text-center",
-                    },
-                    {
-                        targets: [8],
-                        searchable: true,
-                        exactvalue:true
                     }
                 ],
 
             });
 
-            $('#search_sku').on('search keyup', function() {
+            // Search SKU on Enter key press only (not on every keystroke)
+            $('#search_sku').on('keypress', function(e) {
+                if (e.which === 13) { // Enter key
+                    e.preventDefault();
+                    $kitsTable
+                        .column(10)
+                        .search(this.value)
+                        .draw();
+                }
+            });
+
+            // Also trigger search when clearing the field with X button
+            $('#search_sku').on('search', function() {
+                if (this.value === '') {
+                    $kitsTable
+                        .column(10)
+                        .search('')
+                        .draw();
+                }
+            });
+
+            // Search button click handler
+            $('#btn-search-sku').on('click', function() {
                 $kitsTable
                     .column(10)
-                    .search(this.value)
+                    .search($('#search_sku').val())
                     .draw();
+            });
+
+            // Customize DataTables search box - disable auto-search on keystroke
+            // Wait for DataTables to initialize, then modify the search input
+            var $searchInput = $('.dataTables_filter input');
+
+            // Remove default keyup handler and add custom one
+            $searchInput.unbind();
+
+            // Add search button next to the input
+            $searchInput.attr('placeholder', 'Search (Enter to search)');
+            $searchInput.after('<button type="button" class="btn btn-sm btn-primary ml-2" id="dt-search-btn"><i class="fas fa-search"></i></button>');
+
+            // Search on Enter key only
+            $searchInput.on('keypress', function(e) {
+                if (e.which === 13) {
+                    e.preventDefault();
+                    $kitsTable.search(this.value).draw();
+                }
+            });
+
+            // Search on button click
+            $('#dt-search-btn').on('click', function() {
+                $kitsTable.search($searchInput.val()).draw();
+            });
+
+            // Clear search when X is clicked
+            $searchInput.on('search', function() {
+                if (this.value === '') {
+                    $kitsTable.search('').draw();
+                }
             });
 
             $(document).on('click', '.qrcode', function (e) {
@@ -632,7 +679,8 @@
             document.getElementById('search_brand').selectedIndex = 0;
             document.querySelectorAll('#search_model option').forEach(o =>{if (o.value !=0){ o.remove()}});
             document.getElementById('search_sku').value = '';
-            $kitsTable.columns([7,8,10]).search("").draw();
+            $('.dataTables_filter input').val('');
+            $kitsTable.search('').columns([7,8,10]).search("").draw();
         });
 
 

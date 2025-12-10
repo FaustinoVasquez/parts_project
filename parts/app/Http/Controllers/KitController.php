@@ -12,6 +12,7 @@ use App\Models\KitsData;
 use App\Models\PartList;
 use App\Models\SubCategory;
 use App\Models\WorkCenter;
+use App\Services\ReferenceDataCache;
 use Exception;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\View\Factory;
@@ -19,10 +20,100 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 
 class KitController extends Controller
 {
+    /**
+     * Full-text searchable columns (indexed in SQL Server on base table prt.partskitdata)
+     */
+    private array $fullTextColumns = ['brand', 'model', 'lcn', 'kitlcn', 'keywords'];
+
+    /**
+     * Additional columns to search with LIKE (not in Full-Text index)
+     * These are columns from the VIEW that aren't in the base table's Full-Text index
+     */
+    private array $likeSearchColumns = ['shelf_name', 'boxname'];
+
+    /**
+     * Escape special characters for Full-Text Search
+     */
+    private function escapeFullTextSearch(string $term): string
+    {
+        // Remove Full-Text special characters that could cause errors
+        $specialChars = ['"', '-', '&', '|', '!', '(', ')', '{', '}', '[', ']', '^', '~', '*', '?', ':', '\\', '/'];
+        $term = str_replace($specialChars, ' ', $term);
+        // Clean up multiple spaces
+        $term = preg_replace('/\s+/', ' ', trim($term));
+        return $term;
+    }
+
+    /**
+     * Build Full-Text Search condition for SQL Server
+     * Uses CONTAINS() on base table via subquery, since Full-Text index is on prt.partskitdata
+     * not on the view prt.vw_PartsKitData
+     */
+    private function applyFullTextSearch($query, string $searchValue)
+    {
+        $searchValue = trim($searchValue);
+        if (empty($searchValue)) {
+            return $query;
+        }
+
+        // Check if search is purely numeric (likely a KitID)
+        if (is_numeric($searchValue)) {
+            // Exact KitID match (very fast with B-tree index)
+            return $query->where(function ($q) use ($searchValue) {
+                $q->where('kitid', '=', (int)$searchValue)
+                  ->orWhereRaw("CAST(kitid AS NVARCHAR(50)) LIKE ?", ['%' . $searchValue . '%']);
+            });
+        }
+
+        // Escape and prepare search term for Full-Text
+        $escapedTerm = $this->escapeFullTextSearch($searchValue);
+        if (empty($escapedTerm)) {
+            return $query;
+        }
+
+        // Build Full-Text search terms with prefix wildcard for partial matches
+        $words = explode(' ', $escapedTerm);
+        $containsTerms = [];
+        foreach ($words as $word) {
+            if (strlen($word) >= 2) {
+                // Use prefix wildcard to match partial words (e.g., "son*" matches "sony")
+                $containsTerms[] = '"' . $word . '*"';
+            }
+        }
+
+        if (empty($containsTerms)) {
+            return $query;
+        }
+
+        // Join with AND for multi-word searches
+        $containsQuery = implode(' AND ', $containsTerms);
+
+        // Use subquery to search the BASE TABLE (prt.partskitdata) with Full-Text
+        // then filter the view by matching KitIDs
+        // Note: Column names in base table are PascalCase: Brand, Model, LCN, KitLCN, Keywords
+        // Also include LIKE search on view columns not in Full-Text index (shelf_name, boxname)
+        $likePattern = '%' . $escapedTerm . '%';
+
+        $query->where(function ($q) use ($containsQuery, $likePattern) {
+            // Full-Text search on indexed columns (fast)
+            $q->whereRaw(
+                "kitid IN (SELECT KitID FROM [prt].[partskitdata] WHERE CONTAINS((Brand, Model, LCN, KitLCN, Keywords), ?))",
+                [$containsQuery]
+            );
+
+            // LIKE fallback for columns not in Full-Text index (shelf_name, boxname)
+            foreach ($this->likeSearchColumns as $column) {
+                $q->orWhere($column, 'LIKE', $likePattern);
+            }
+        });
+
+        return $query;
+    }
 
     /**
      * @param Request $request
@@ -36,27 +127,26 @@ class KitController extends Controller
 
             if (auth()->user()->role == 'employee') {
                 $data = KitsData::query()->where('UserID', auth()->id());
-
-//                if($request->model !== '0'){
-//                    $data->where('model', $request->model);
-//                }
-
             } else {
                 $data = KitsData::query();
-
-                //added=================
-//                if($request->model !== '0'){
-//                   $data->where('model', $request->model);
-//                }
-                //-------------------------
             }
 
             if($request->model !== '0'){
                 $data->where('model', $request->model);
             }
 
+            $self = $this; // Capture $this for closure
+            $searchValue = $request->input('search.value');
+
             return datatables($data)
                 ->addIndexColumn()
+                // Override global search to use Full-Text Search
+                // Note: columns must have searchable:false in JS config to prevent DataTables adding LIKE filters
+                ->filter(function ($query) use ($searchValue, $self) {
+                    if (!empty($searchValue)) {
+                        $self->applyFullTextSearch($query, $searchValue);
+                    }
+                }, true)
                 ->editColumn('boxname', function ($kit) {
                     if(!$kit->BoxName){
                         return 'No Box Yet';
@@ -112,10 +202,10 @@ class KitController extends Controller
     {
         return view('kits.create', [
             'kit' => new Kit,
-            'workCenters' => WorkCenter::all(),
-            'categories' => Category::all(),
-            'subCategories' => SubCategory::all(),
-            'countries' => Country::all()
+            'workCenters' => ReferenceDataCache::workCenters(),
+            'categories' => ReferenceDataCache::categories(),
+            'subCategories' => ReferenceDataCache::subCategories(),
+            'countries' => ReferenceDataCache::countries()
         ]);
     }
 
@@ -187,10 +277,10 @@ class KitController extends Controller
     {
         return view('kits.edit', [
             'kit' => $kit,
-            'workCenters' => WorkCenter::all(),
-            'categories' => Category::all(),
-            'subCategories' => SubCategory::all(),
-            'countries' => Country::all()
+            'workCenters' => ReferenceDataCache::workCenters(),
+            'categories' => ReferenceDataCache::categories(),
+            'subCategories' => ReferenceDataCache::subCategories(),
+            'countries' => ReferenceDataCache::countries()
         ]);
     }
 

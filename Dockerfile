@@ -1,5 +1,5 @@
-# Use PHP 8.1 FPM as the base image
-FROM php:8.1-fpm
+# Use PHP 8.2 FPM as the base image
+FROM php:8.2-fpm
 
 # Set the environment to non-interactive for package installations
 ENV DEBIAN_FRONTEND=noninteractive
@@ -24,15 +24,19 @@ RUN apt-get update && apt-get install -y \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install the Microsoft ODBC driver for SQL Server and required dependencies
-RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
-    curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
-    apt-get update && ACCEPT_EULA=Y apt-get install -y msodbcsql17 unixodbc-dev
+# Updated for PHP 8.1 / Debian (apt-key is deprecated, using ODBC 18)
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/microsoft.gpg && \
+    echo "deb [arch=amd64,arm64,armhf] https://packages.microsoft.com/debian/12/prod bookworm main" > /etc/apt/sources.list.d/mssql-release.list && \
+    apt-get update && ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
 
-# Install the sqlsrv and pdo_sqlsrv extensions
+# Install the sqlsrv and pdo_sqlsrv extensions (latest versions for PHP 8.2)
 RUN pecl install sqlsrv pdo_sqlsrv
 
 # Enable the sqlsrv and pdo_sqlsrv extensions
 RUN docker-php-ext-enable sqlsrv pdo_sqlsrv
+
+# Install Redis extension for caching (latest version for PHP 8.2)
+RUN pecl install redis && docker-php-ext-enable redis
 
 # Ensure PHP-FPM listens on port 9000
 RUN sed -i 's|^listen = .*|listen = 0.0.0.0:9000|' /usr/local/etc/php-fpm.d/www.conf
